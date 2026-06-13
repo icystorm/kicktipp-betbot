@@ -92,33 +92,140 @@ def get_table_rows(soup):
     return [tr.find_all('td') for tr in tbody.find_all('tr')]
 
 
-def parse_match_rows(browser: RoboBrowser, community, matchday = None):
-    """Fetch latest odds for each match
-    Returns a list of tuples (heimtipp,gasttipp, match)
-    """
-    browser.open(get_tippabgabe_url(community, matchday))
+def extract_quote_points(text):
+    """Extracts three integers from a bonus string like '3 - 7 - 7'."""
+    match = re.match(r'\s*(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\s*', text)
+    if match:
+        return tuple(map(int, match.groups()))
+    return None
+
+
+def fetch_external_odds(browser: RoboBrowser, matchday=None):
+    """Fetches odds from a reference community (wm-tippspiel)."""
+    ref_community = "wm-tippspiel"
+    print(f"Fetching reference odds from community: {ref_community}")
     
+    current_url = browser.url
+    browser.open(get_tippabgabe_url(ref_community, matchday))
+    content = get_kicktipp_content(browser)
+    if not content:
+        browser.open(current_url)
+        return {}
+    
+    rows = get_table_rows(content)
+    odds_map = {}
+    
+    for row in rows:
+        if len(row) < 4:
+            continue
+        home = row[1].get_text(strip=True)
+        away = row[2].get_text(strip=True)
+        
+        odds = []
+        for cell in row:
+            if not odds:
+                odds_elements = cell.find_all('a') or cell.find_all('span', class_='quote-text')
+                if odds_elements:
+                    for elem in odds_elements:
+                        text = elem.find('span', class_='quote-text').get_text(strip=True) if elem.name == 'a' else elem.get_text(strip=True)
+                        odds.append(text)
+                    if len(odds) == 3:
+                        odds_map[(home, away)] = odds
+                        break
+                    else:
+                        odds = []
+    browser.open(current_url)
+    return odds_map
+
+
+def parse_match_rows(browser: RoboBrowser, community, matchday=None):
+    """Parses matches and optionally bonus points, adapting to column shifts."""
+    browser.open(get_tippabgabe_url(community, matchday))
     content = get_kicktipp_content(browser)
     rows = get_table_rows(content)
 
-    matchtuple = list()
+    matchtuple = []
     lastmatch = None
+
     for row in rows:
-        heimtipp = row[3].find(
-            'input', id=lambda x: x and x.endswith('_heimTipp'))
-        gasttipp = row[3].find(
-            'input', id=lambda x: x and x.endswith('_gastTipp'))
+        # A match row must have at least 4 columns: Date, Home, Away, Input fields
+        if len(row) < 4:
+            continue  # Skip broken or unexpected rows
+
+        home_team = row[1].get_text(strip=True)
+        away_team = row[2].get_text(strip=True)
+        match_date = row[0].get_text(strip=True)
+
+        heimtipp = None
+        gasttipp = None
+        quote_points = (0, 0, 0)
+        odds = []
+
+        # Iterate through columns to find input fields, bonus points, and odds
+        for i, cell in enumerate(row):
+            # Check for input fields (heimTipp/gastTipp)
+            if heimtipp is None: # Only search if not found yet
+                input_h = cell.find('input', id=lambda x: x and x.endswith('_heimTipp'))
+                input_g = cell.find('input', id=lambda x: x and x.endswith('_gastTipp'))
+                if input_h and input_g:
+                    heimtipp = input_h
+                    gasttipp = input_g
+                    continue # Move to next cell, as input fields are usually in one cell
+
+            # Check for bonus points (usually in column 3 or 4, before input fields)
+            if i >= 3 and not quote_points[0]: # Only check if not found yet and not already identified
+                qp = extract_quote_points(cell.get_text())
+                if qp:
+                    quote_points = qp
+                    continue # Move to next cell
+
+            # Check for odds (usually in the last or second to last column)
+            if not odds: # Only search if odds not found yet
+                odds_elements = cell.find_all('a') # Try links first
+                if not odds_elements:
+                    odds_elements = cell.find_all('span', class_='quote-text') # Fallback to spans
+                
+                if odds_elements:
+                    for elem in odds_elements:
+                        text = elem.find('span', class_='quote-text').get_text(strip=True) if elem.name == 'a' else elem.get_text(strip=True)
+                        odds.append(text)
+                    if len(odds) != 3: # If not exactly 3 odds, consider it as no valid odds
+                        odds = []
+
         try:
-            odds=[odd.replace(" ","") for odd in row[4].get_text().split("/")]
-            match = Match(row[1].get_text(), row[2].get_text(), row[0].get_text(
-            ), odds[0], odds[1], odds[2])
-        except:
-            print("Error: Not enough data, maybe there are no rates yet.")
-            sys.exit()
-        if not match.match_date:
+            if len(odds) == 3:
+                match = Match(home_team, away_team, match_date, odds[0], odds[1], odds[2])
+            else:
+                match = Match(home_team, away_team, match_date, "0", "0", "0")
+
+        except Exception as e:
+            print(f"❌ Error creating Match object for {home_team} vs {away_team}: {e}")
+            continue
+
+        # If input fields are not found, this isn't a bettable match row
+        if not heimtipp or not gasttipp:
+            continue
+
+        if not match.match_date and lastmatch:
             match.match_date = lastmatch.match_date
+
         lastmatch = match
-        matchtuple.append((heimtipp, gasttipp, match))
+        matchtuple.append((heimtipp, gasttipp, match, quote_points))
+
+    # Try to fill in missing odds from a reference community
+    if any(m[2].rate_home == 0.0 for m in matchtuple) and "wm" in community and community != "wm-tippspiel":
+        ext_odds = fetch_external_odds(browser, matchday)
+        if ext_odds:
+            updated_count = 0
+            for _, _, match, _ in matchtuple:
+                if match.rate_home == 0.0 or match.rate_deuce == 0.0 or match.rate_road == 0.0:
+                    key = (match.hometeam, match.roadteam)
+                    if key in ext_odds:
+                        o = ext_odds[key]
+                        match.rate_home, match.rate_deuce, match.rate_road = o
+                        updated_count += 1
+            if updated_count > 0:
+                print(f"  Successfully fetched odds for {updated_count} matches from wm-tippspiel.")
 
     return matchtuple
 
@@ -128,8 +235,8 @@ def get_tippabgabe_url(community, matchday = None):
         return tippabgabeurl
     else:
         matchday = int(matchday)
-        if matchday < 1 or matchday > 34:
-            raise IndexError("The matchday '{}' is not valid, use only 1 to 34!".format(matchday))
+        if matchday < 1:
+            raise IndexError("The matchday '{}' is not valid, use only >= 1!".format(matchday))
         return tippabgabeurl + '?&spieltagIndex={matchday}'.format(matchday=matchday)
 
 
@@ -154,7 +261,7 @@ def get_communities(browser: RoboBrowser, desired_communities: list):
 
     def is_community(link):
         hreftext = gethreftext(link)
-        if hreftext == link.get_text():
+        if hreftext == link.get_text().lower().replace(" ", "-"):
             return True
         else:
             linkdiv = link.find('div', {'class': "menu-title-mit-tippglocke"})
@@ -170,6 +277,77 @@ def intersection(a, b):
     i = [x for x in a if x in b]
     return i
 
+def fetch_scoring_rules(community):
+    """Fetches scoring rules from the kicktipp page."""
+    browser = RoboBrowser(parser="html5lib")
+    url = f"{URL_BASE}/{community}/spielregeln"
+    browser.open(url)
+
+    scoring_table = None
+
+    try:
+        # Iterate through all tables on the page
+        for table in browser.find_all('table'):
+            rows = table.find_all('tr')
+            has_sieg_row = False
+            has_unentschieden_row = False
+
+            # Check if it's the scoring rules table
+            for row in rows:
+                cells = row.find_all('td')
+                if cells and cells[0].get_text().strip() == 'Sieg':
+                    has_sieg_row = True
+                elif cells and cells[0].get_text().strip() == 'Unentschieden':
+                    has_unentschieden_row = True
+
+            if has_sieg_row and has_unentschieden_row:
+                scoring_table = table
+
+        # Extract points from the scoring table if found
+        if scoring_table:
+            rows = scoring_table.find_all('tr')
+            win_row = None
+            draw_row = None
+
+            for row in rows:
+                cells = row.find_all('td')
+                if cells and cells[0].get_text().strip() == 'Sieg':
+                    win_row = row
+                elif cells and cells[0].get_text().strip() == 'Unentschieden':
+                    draw_row = row
+
+            if win_row and draw_row:
+                win_points_cells = win_row.find_all('td')
+                win_tendency_points = int(win_points_cells[1].get_text())
+                win_goal_difference_points = int(win_points_cells[2].get_text())
+                win_exact_score_points = int(win_points_cells[3].get_text())
+
+                draw_points_cells = draw_row.find_all('td')
+                draw_tendency_points = int(draw_points_cells[1].get_text())
+                draw_exact_score_points = int(draw_points_cells[3].get_text())
+            else:
+                raise ValueError("Could not find 'Sieg' or 'Unentschieden' rows in the identified scoring table.")
+        else:
+             # Set default scoring points if the table is not found
+            win_exact_score_points = 4
+            win_goal_difference_points = 3
+            win_tendency_points = 2
+            draw_exact_score_points = 4
+            draw_tendency_points = 2
+        
+        return win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points
+
+
+    except Exception as e:
+        print(f"Error fetching or parsing scoring rules or MIN/MAX table: {e}")
+        # Set default scoring points
+        win_exact_score_points = 4
+        win_goal_difference_points = 3
+        win_tendency_points = 2
+        draw_exact_score_points = 4
+        draw_tendency_points = 2
+        return win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points
+    # --- End of Parsing Logic ---
 
 def place_bets(browser: RoboBrowser, communities: list, predictor, override=False, deadline=None, dryrun=False, matchday=None):
     """Place bets on all given communities."""
@@ -177,26 +355,36 @@ def place_bets(browser: RoboBrowser, communities: list, predictor, override=Fals
         print("Community: {0}".format(com))
         matches = parse_match_rows(browser, com, matchday)
         submitform = browser.get_form()
-        for field_hometeam, field_roadteam, match in matches:
+        win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points = fetch_scoring_rules(com)
+        for field_hometeam, field_roadteam, match, quote_points in matches:
+            if match.rate_home == 0.0 or match.rate_deuce == 0.0 or match.rate_road == 0.0:
+                print(f"{match} - missing odds, skipping bet placement.")
+                continue
             if not field_hometeam or not field_roadteam:
+                homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, quote_points)
+                print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
                 print("{0} - no bets possible".format(match))
                 continue
 
             input_hometeam_value = submitform[field_hometeam.attrs['name']].value
             input_roadteam_value = submitform[field_roadteam.attrs['name']].value
             if not override and (input_hometeam_value or input_roadteam_value):
+                homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, quote_points)
+                print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
                 print("{0} - skipped, already placed {1}:{2}".format(match,
                                                                      input_hometeam_value, input_roadteam_value))
                 continue
 
             if deadline is not None:
                 if not is_before_dealine(deadline, match.match_date):
+                    homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, quote_points)
+                    print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
                     time_to_match = match.match_date - datetime.datetime.now()
                     print("{0} - not betting yet, due in {1}".format(match,
                                                                      timedelta_tostring(time_to_match)))
                     continue
 
-            homebet, roadbet = predictor.predict(match)
+            homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, quote_points)
             print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
             submitform[field_hometeam.attrs['name']] = str(homebet)
             submitform[field_roadteam.attrs['name']] = str(roadbet)
@@ -256,7 +444,9 @@ def main(arguments):
     browser.session.cookies['login'] = token
 
     # Which communities are considered, fail if no were found
-    communities = get_communities(browser, communities)
+    if not communities:
+        communities = get_communities(browser, communities)
+
     if(len(communities) == 0):
         exit("No community found!?")
 
