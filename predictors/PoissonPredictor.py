@@ -9,7 +9,7 @@ class PoissonPredictor(PredictorBase):
     MAX_GOALS = 7
 
     # Dixon-Coles Korrekturterm rho
-    RHO = -0.0497  # MLE-Schätzung aus reinen WM-Endrundendaten.
+    RHO = 0.0
 
     def calculate_probabilities(self, rate_home, rate_deuce, rate_road):
         return pb.implied.power(
