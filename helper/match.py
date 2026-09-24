@@ -11,9 +11,9 @@ class Match(object):
         self.__hometeam = hometeam
         self.__roadteam = roadteam
         self.match_date = match_date
-        self.rate_home = float(rate_home)
-        self.rate_deuce = float(rate_deuce)
-        self.rate_road = float(rate_road)
+        self.rate_home = rate_home
+        self.rate_deuce = rate_deuce
+        self.rate_road = rate_road
 
     def __str__(self):
         return self.__match_date.strftime("%d.%m.%Y %H:%M") \
@@ -59,7 +59,7 @@ class Match(object):
     
     @rate_home.setter
     def rate_home(self, value):
-        self.__rate_home = float(value)
+        self.__rate_home = float(str(value).replace(',', '.'))
 
     @property
     def rate_deuce(self):
@@ -67,7 +67,7 @@ class Match(object):
     
     @rate_deuce.setter
     def rate_deuce(self, value):
-        self.__rate_deuce = float(value)
+        self.__rate_deuce = float(str(value).replace(',', '.'))
 
     @property
     def rate_road(self):
@@ -75,7 +75,7 @@ class Match(object):
 
     @rate_road.setter
     def rate_road(self, value):
-        self.__rate_road = float(value)
+        self.__rate_road = float(str(value).replace(',', '.'))
 
     @property
     def odds(self):
