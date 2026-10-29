@@ -1,3 +1,6 @@
 docopt==0.6.2
 robobro==0.5.3
 html5lib==1.1
+numpy==2.5.4
+scipy==1.18.1
+penaltyblog==1.13.1
