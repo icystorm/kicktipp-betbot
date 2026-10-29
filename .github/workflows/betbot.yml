@@ -50,7 +50,8 @@ jobs:
         LOGIN_TOKEN: ${{ secrets.LOGIN_TOKEN }}
         DEADLINE: ${{ inputs.deadline || '1h' }}
         DRY_RUN: ${{ inputs.dry_run == true }}
-        COMMUNITIES: ${{ inputs.communities }}
+        # Communities from the manual input, else the COMMUNITIES repository variable, else all communities of the account
+        COMMUNITIES: ${{ inputs.communities || vars.COMMUNITIES }}
         # kicktipp shows kickoff times in Berlin time and the deadline check compares them with the local clock
         TZ: Europe/Berlin
       run: |
