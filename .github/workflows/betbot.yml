@@ -1,0 +1,66 @@
+# Places the kicktipp bets on a schedule, so the betbot does not have to run on a personal server.
+#
+# Setup: add the login token as repository secret LOGIN_TOKEN
+# (Settings > Secrets and variables > Actions). Create the token once with
+#   python kicktippbb.py --get-login-token
+# The token is a login cookie; when the bot starts failing with a login error, generate a new one.
+#
+# Scheduled runs only start from the default branch.
+
+name: Place bets
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      deadline:
+        description: 'Only bet on matches starting within this window, e.g. 10m, 1h, 1d'
+        required: false
+        default: '1h'
+      dry_run:
+        description: 'Only print the predictions, do not place bets'
+        type: boolean
+        default: false
+      communities:
+        description: 'Community names, space separated (empty = all communities of the account)'
+        required: false
+        default: ''
+
+concurrency:
+  group: place-bets
+  cancel-in-progress: false
+
+jobs:
+  bet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: pip
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+    - name: Place bets
+      env:
+        LOGIN_TOKEN: ${{ secrets.LOGIN_TOKEN }}
+        DEADLINE: ${{ inputs.deadline || '1h' }}
+        DRY_RUN: ${{ inputs.dry_run == true }}
+        COMMUNITIES: ${{ inputs.communities }}
+        # kicktipp shows kickoff times in Berlin time and the deadline check compares them with the local clock
+        TZ: Europe/Berlin
+      run: |
+        if [ -z "$LOGIN_TOKEN" ]; then
+          echo "::error::Repository secret LOGIN_TOKEN is not set"
+          exit 1
+        fi
+        args=(--use-login-token "$LOGIN_TOKEN" --deadline "$DEADLINE")
+        if [ "$DRY_RUN" = "true" ]; then
+          args+=(--dry-run)
+        fi
+        # COMMUNITIES is intentionally unquoted so that several names are passed as separate arguments
+        python ./kicktippbb.py "${args[@]}" $COMMUNITIES
