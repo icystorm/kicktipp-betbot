@@ -63,4 +63,4 @@ jobs:
           args+=(--dry-run)
         fi
         # COMMUNITIES is intentionally unquoted so that several names are passed as separate arguments
-        python ./kicktippbb.py "${args[@]}" $COMMUNITIES
+        python ./kicktippbb.py "${args[@]}" burgauer-jungs $COMMUNITIES
