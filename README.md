@@ -62,6 +62,22 @@ $ kicktippbb.py --use-login-token c3HfazFh6sd mycommunityname
 ...
 ```
 
+### Run on a schedule with GitHub Actions
+The repository contains the workflow `.github/workflows/betbot.yml`. It places the bets every 30 minutes on GitHub's servers, so no own server is needed.
+
+1. Generate a login token once (see above) and add it as repository secret `LOGIN_TOKEN` under *Settings → Secrets and variables → Actions*.
+2. Optional: add the repository variable `COMMUNITIES` with the community name, e.g. `mycommunityname`. If it is not set, the bot bets in all communities of the account.
+3. Scheduled runs only start from the default branch.
+
+Each scheduled run only places bets on matches that start within the next hour. Since the workflow runs every 30 minutes, every match gets several attempts in its last hour before kickoff.
+
+To start a run manually, open *Actions → Place bets → Run workflow*. The inputs are:
+- `deadline`: only bet on matches starting within this window, default `1h`
+- `dry_run`: only print the predictions
+- `communities`: community names, separated by spaces. This overrides the `COMMUNITIES` variable.
+
+The workflow sets the time zone to `Europe/Berlin`, because kicktipp shows kickoff times in Berlin time.
+
 ### Taming the daemon
 Some useful options to tweak the behavior of the betbot.
 
