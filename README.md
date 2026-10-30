@@ -69,10 +69,10 @@ The repository contains the workflow `.github/workflows/betbot.yml`. It places t
 2. Optional: add the repository variable `COMMUNITIES` with the community name, e.g. `mycommunityname`. If it is not set, the bot bets in all communities of the account.
 3. Scheduled runs only start from the default branch.
 
-Each scheduled run only places bets on matches that start within the next hour. Since the workflow runs every 30 minutes, every match gets several attempts in its last hour before kickoff.
+Each scheduled run only places bets on matches that start within the next 8 hours. GitHub does not always start scheduled runs on time, so the window is longer than the gaps between runs. A match that has already got a bet is skipped by later runs.
 
 To start a run manually, open *Actions → Place bets → Run workflow*. The inputs are:
-- `deadline`: only bet on matches starting within this window, default `1h`
+- `deadline`: only bet on matches starting within this window, default `8h`
 - `dry_run`: only print the predictions
 - `communities`: community names, separated by spaces. This overrides the `COMMUNITIES` variable.
 
