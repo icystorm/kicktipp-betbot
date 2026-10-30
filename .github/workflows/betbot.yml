@@ -17,7 +17,7 @@ on:
       deadline:
         description: 'Only bet on matches starting within this window, e.g. 10m, 1h, 1d'
         required: false
-        default: '1h'
+        default: '8h'
       dry_run:
         description: 'Only print the predictions, do not place bets'
         type: boolean
@@ -48,7 +48,7 @@ jobs:
     - name: Place bets
       env:
         LOGIN_TOKEN: ${{ secrets.LOGIN_TOKEN }}
-        DEADLINE: ${{ inputs.deadline || '1h' }}
+        DEADLINE: ${{ inputs.deadline || '8h' }}
         DRY_RUN: ${{ inputs.dry_run == true }}
         # Communities from the manual input, else the COMMUNITIES repository variable, else all communities of the account
         COMMUNITIES: ${{ inputs.communities || vars.COMMUNITIES }}
